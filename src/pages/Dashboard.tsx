@@ -496,10 +496,10 @@ export default function Dashboard() {
                                             <p className="text-xs text-white/30 font-medium capitalize">{log.reason || 'Session'}</p>
                                             <button 
                                                 onClick={(e) => { e.stopPropagation(); handleDeleteLog(log.id); }}
-                                                className="p-1.5 rounded-lg text-white/20 hover:text-brand-red hover:bg-brand-red/10 transition-colors opacity-0 group-hover:opacity-100"
+                                                className="p-2 rounded-lg text-white/20 hover:text-brand-red hover:bg-brand-red/10 transition-colors"
                                                 title="Delete Log"
                                             >
-                                                <Trash2 size={14} />
+                                                <Trash2 size={16} />
                                             </button>
                                         </div>
                                     </div>
