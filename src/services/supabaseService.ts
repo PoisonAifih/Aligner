@@ -127,5 +127,43 @@ export const supabaseService = {
 
       if (error) throw error;
       return data;
+  },
+
+  async checkMidnightSplit(userId: string, activeLogId: string | null, startTimeString: string) {
+      if (!activeLogId) return null;
+      
+      const start = new Date(startTimeString);
+      const now = new Date();
+      
+      const startDay = new Date(start);
+      startDay.setHours(0,0,0,0);
+      const today = new Date(now);
+      today.setHours(0,0,0,0);
+
+      if (startDay.getTime() < today.getTime()) {
+          console.log("Midnight split detected. Splitting...");
+          
+          const endOfStartDay = new Date(start);
+          endOfStartDay.setHours(23, 59, 59, 999);
+          
+          await this.pauseTimer(activeLogId, 'Midnight Split');
+          await supabase.from('timer_logs').update({ end_time: endOfStartDay.toISOString() }).eq('id', activeLogId);
+
+          const { data: newLog, error } = await supabase
+            .from('timer_logs')
+            .insert([
+                { 
+                user_id: userId, 
+                start_time: today.toISOString(),
+                status: 'RUNNING' 
+                }
+            ])
+            .select()
+            .single();
+            
+          if (error) throw error;
+          return newLog;
+      }
+      return null;
   }
 };

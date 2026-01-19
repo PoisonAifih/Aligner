@@ -40,23 +40,42 @@ export default function Dashboard() {
   const [confirmPassword, setConfirmPassword] = useState('');
   const [passwordMessage, setPasswordMessage] = useState({ type: '', text: '' });
 
+  const [selectedDate, setSelectedDate] = useState(new Date());
+
   const timerRef = useRef<number | null>(null);
 
   useEffect(() => {
     checkUser();
-  }, []);
+    // Midnight check interval
+    const midnightInterval = setInterval(() => {
+        if (timerStatus === 'RUNNING' && startTime && activeLogId && user) {
+            supabaseService.checkMidnightSplit(user.id, activeLogId, startTime.toISOString())
+                .then(newLog => {
+                    if (newLog) {
+                        setStartTime(new Date(newLog.start_time));
+                        setActiveLogId(newLog.id);
+                        fetchDailyData(selectedDate);
+                    }
+                });
+        }
+    }, 60000); // Check every minute
+    return () => clearInterval(midnightInterval);
+  }, [timerStatus, startTime, activeLogId, user, selectedDate]);
 
   useEffect(() => {
     if (user) {
-      fetchDailyData();
+      fetchDailyData(selectedDate);
       fetchWeeklyData();
     }
-  }, [user]);
+  }, [user, selectedDate]);
 
   useEffect(() => {
     if (timerStatus === 'RUNNING' && startTime) {
       timerRef.current = setInterval(() => {
-        setElapsedSeconds(prev => prev + 1); 
+        // Recalculate based on current time to avoid drift
+        const now = new Date();
+        const start = new Date(startTime);
+        setElapsedSeconds(Math.floor((now.getTime() - start.getTime()) / 1000));
       }, 1000);
     } else {
       if (timerRef.current) clearInterval(timerRef.current);
@@ -90,20 +109,30 @@ export default function Dashboard() {
         .single();
       
       if (logs) {
-        setTimerStatus('RUNNING');
-        setStartTime(new Date(logs.start_time));
-        setActiveLogId(logs.id);
-        const now = new Date();
-        const start = new Date(logs.start_time);
-        setElapsedSeconds(Math.floor((now.getTime() - start.getTime()) / 1000));
+        // Check for midnight split on load
+        const splitLog = await supabaseService.checkMidnightSplit(user.id, logs.id, logs.start_time);
+        
+        if (splitLog) {
+            setTimerStatus('RUNNING');
+            setStartTime(new Date(splitLog.start_time));
+            setActiveLogId(splitLog.id);
+            setElapsedSeconds(Math.floor((new Date().getTime() - new Date(splitLog.start_time).getTime()) / 1000));
+        } else {
+            setTimerStatus('RUNNING');
+            setStartTime(new Date(logs.start_time));
+            setActiveLogId(logs.id);
+            const now = new Date();
+            const start = new Date(logs.start_time);
+            setElapsedSeconds(Math.floor((now.getTime() - start.getTime()) / 1000));
+        }
       }
     }
   };
 
-  const fetchDailyData = async () => {
+  const fetchDailyData = async (date: Date) => {
     if (!user) return;
     try {
-      const logs = await supabaseService.getDailyLogs(user.id, new Date());
+      const logs = await supabaseService.getDailyLogs(user.id, date);
       setTodayLogs(logs);
     } catch (error) {
       console.error('Error fetching logs', error);
@@ -131,7 +160,7 @@ export default function Dashboard() {
        setStartTime(new Date());
        setActiveLogId(log.id);
        setElapsedSeconds(0);
-       fetchDailyData(); 
+       fetchDailyData(selectedDate); 
     } catch (err) {
       console.error(err);
     }
@@ -147,7 +176,7 @@ export default function Dashboard() {
       await supabaseService.pauseTimer(activeLogId, pauseReason);
       setTimerStatus('IDLE'); 
       setShowPauseModal(false);
-      fetchDailyData();
+      fetchDailyData(selectedDate);
       fetchWeeklyData();
       setActiveLogId(null);
     } catch (err) {
@@ -162,7 +191,7 @@ export default function Dashboard() {
           const end = new Date(`${manualDate}T${manualEndTime}`);
           await supabaseService.addManualLog(user.id, start, end, manualReason);
           setShowManualEntryModal(false);
-          fetchDailyData();
+          fetchDailyData(selectedDate);
           fetchWeeklyData();
       } catch (err) {
           console.error(err);
@@ -324,9 +353,14 @@ export default function Dashboard() {
                 <div className="bg-card border border-white/5 p-8 rounded-[2.5rem] shadow-xl h-auto">
                      <h3 className="font-serif-display text-lg text-white/90 flex items-center justify-between mb-6">
                         <span className="flex items-center gap-3"><CalendarIcon size={20} className="text-brand-green"/> Calendar</span>
+                        <span className="text-xs font-sans text-white/30 bg-white/5 px-2 py-1 rounded-lg">Select date to view history</span>
                     </h3>
                     <div className="calendar-wrapper bg-brand-base rounded-3xl p-4 border border-white/5">
-                        <Calendar className="w-full"/>
+                        <Calendar 
+                            className="w-full"
+                            value={selectedDate} // Highlight selected, not just today
+                            onClickDay={(value) => setSelectedDate(value)} // Update state on click
+                        />
                     </div>
                 </div>
 
@@ -426,30 +460,81 @@ export default function Dashboard() {
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
                     {todayLogs.length === 0 && <div className="col-span-full py-12 text-center text-white/30 italic">No sessions recorded yet today. Start your journey!</div>}
-                    {todayLogs.map(log => (
-                        <div key={log.id} className="flex justify-between items-center p-6 bg-brand-base/50 hover:bg-brand-base rounded-3xl border border-white/5 transition-all group hover:scale-[1.02] cursor-default">
-                            <div className="flex flex-col">
-                                <span className="text-2xl font-serif-display text-white/90">
-                                    {new Date(log.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 
-                                </span>
-                                <span className="text-xs text-white/40 mt-1 uppercase tracking-wider flex items-center gap-2">
-                                     {log.end_time ? (
-                                         <>
-                                            to {new Date(log.end_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
-                                         </>
-                                     ) : <span className="text-brand-green font-bold animate-pulse">Running</span>}
-                                </span>
-                            </div>
-                            
-                            <div className="text-right">
-                                <div className={`px-4 py-1.5 rounded-full text-[10px] font-bold tracking-widest uppercase border inline-flex items-center gap-1.5 ${log.status === 'RUNNING' ? 'bg-brand-green/20 text-brand-green border-brand-green/30' : 'bg-white/5 text-white/30 border-white/10'}`}>
-                                    <div className={`w-1.5 h-1.5 rounded-full ${log.status === 'RUNNING' ? 'bg-brand-green' : 'bg-white/30'}`}></div>
-                                    {log.status}
+                    {(() => {
+                        const items = [];
+                        for (let i = 0; i < todayLogs.length; i++) {
+                            const log = todayLogs[i];
+                            // Add Session
+                            items.push(
+                                <div key={log.id} className="flex justify-between items-center p-6 bg-brand-base/50 hover:bg-brand-base rounded-3xl border border-white/5 transition-all group hover:scale-[1.02] cursor-default mb-4">
+                                    <div className="flex flex-col">
+                                        <span className="text-2xl font-serif-display text-white/90">
+                                            {new Date(log.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 
+                                        </span>
+                                        <span className="text-xs text-white/40 mt-1 uppercase tracking-wider flex items-center gap-2">
+                                             {log.end_time ? (
+                                                 <>
+                                                    to {new Date(log.end_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                 </>
+                                             ) : <span className="text-brand-green font-bold animate-pulse">Running</span>}
+                                        </span>
+                                    </div>
+                                    
+                                    <div className="text-right">
+                                        <div className={`px-4 py-1.5 rounded-full text-[10px] font-bold tracking-widest uppercase border inline-flex items-center gap-1.5 ${log.status === 'RUNNING' ? 'bg-brand-green/20 text-brand-green border-brand-green/30' : 'bg-white/5 text-white/30 border-white/10'}`}>
+                                            <div className={`w-1.5 h-1.5 rounded-full ${log.status === 'RUNNING' ? 'bg-brand-green' : 'bg-white/30'}`}></div>
+                                            {log.status === 'RUNNING' ? 'Active' : 'Wear Time'}
+                                        </div>
+                                    </div>
                                 </div>
-                                <p className="text-xs text-white/30 mt-2 font-medium capitalize">{log.reason || 'Session'}</p>
-                            </div>
-                        </div>
-                    ))}
+                            );
+
+                            // Detect Break
+                            if (log.end_time && i < todayLogs.length - 1) {
+                                const nextLog = todayLogs[i+1];
+                                const breakStart = new Date(log.end_time);
+                                const breakEnd = new Date(nextLog.start_time);
+                                const diffMinutes = Math.round((breakEnd.getTime() - breakStart.getTime()) / 60000);
+
+                                if (diffMinutes > 0) {
+                                    items.push(
+                                        <div key={`break-${i}`} className="flex justify-between items-center px-8 py-3 bg-transparent border-l-2 border-dashed border-white/10 ml-8 my-2">
+                                            <div className="flex flex-col">
+                                                 <span className="text-sm font-medium text-white/50">{log.reason || 'Break'}</span>
+                                                 <span className="text-xs text-brand-accent/70 mt-0.5 font-mono">
+                                                     {breakStart.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - {breakEnd.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                 </span>
+                                            </div>
+                                            <span className="text-xs font-bold text-brand-yellow/80 bg-brand-yellow/10 px-2 py-1 rounded-md border border-brand-yellow/10">
+                                                {diffMinutes}m BREAK
+                                            </span>
+                                        </div>
+                                    );
+                                }
+                            } else if (log.end_time && i === todayLogs.length - 1 && selectedDate.toDateString() === new Date().toDateString()) {
+                                // Break status for current moment if last log is stopped
+                                const breakStart = new Date(log.end_time);
+                                const now = new Date();
+                                const diffMinutes = Math.round((now.getTime() - breakStart.getTime()) / 60000);
+                                if (diffMinutes > 1) {
+                                     items.push(
+                                        <div key={`break-now`} className="flex justify-between items-center px-8 py-3 bg-brand-accent/5 border border-brand-accent/20 rounded-2xl ml-4 my-2 animate-pulse">
+                                            <div className="flex flex-col">
+                                                 <span className="text-sm font-medium text-brand-accent">{log.reason || 'Current Break'}</span>
+                                                 <span className="text-xs text-white/40 mt-0.5 font-mono">
+                                                     {breakStart.toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} - Now
+                                                 </span>
+                                            </div>
+                                            <span className="text-xs font-bold text-brand-accent bg-brand-accent/10 px-2 py-1 rounded-md">
+                                                Active Break
+                                            </span>
+                                        </div>
+                                    );
+                                }
+                            }
+                        }
+                        return items.length > 0 ? items : <p className="text-white/30 text-center py-8">No activity recorded for this da.</p>;
+                    })()}
                 </div>
             </div>
       </div>
