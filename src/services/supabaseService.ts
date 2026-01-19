@@ -129,6 +129,15 @@ export const supabaseService = {
       return data;
   },
 
+  async deleteLog(logId: string) {
+      const { error } = await supabase
+        .from('timer_logs')
+        .delete()
+        .eq('id', logId);
+      
+      if (error) throw error;
+  },
+
   async checkMidnightSplit(userId: string, activeLogId: string | null, startTimeString: string) {
       if (!activeLogId) return null;
       

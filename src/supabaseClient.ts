@@ -11,7 +11,7 @@ import { CookieStorage } from "./lib/storage";
 
 export const supabase = createClient(supabaseUrl || '', supabaseKey || '', {
   auth: {
-    storage: CookieStorage,
+    // storage: CookieStorage,
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true

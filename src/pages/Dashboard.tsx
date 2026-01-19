@@ -2,7 +2,7 @@
 import { useState, useEffect, useRef } from 'react';
 import Calendar from 'react-calendar';
 import { BarChart, Bar, XAxis, ResponsiveContainer, Cell } from 'recharts';
-import { Play, Pause, Settings, Plus, X, Calendar as CalendarIcon, History, BarChart2 } from 'lucide-react';
+import { Play, Pause, Settings, Plus, X, Calendar as CalendarIcon, History, BarChart2, Trash2 } from 'lucide-react';
 import { supabaseService } from '../services/supabaseService';
 import type { TimerLog } from '../services/supabaseService';
 import { supabase } from '../supabaseClient';
@@ -46,7 +46,6 @@ export default function Dashboard() {
 
   useEffect(() => {
     checkUser();
-    // Midnight check interval
     const midnightInterval = setInterval(() => {
         if (timerStatus === 'RUNNING' && startTime && activeLogId && user) {
             supabaseService.checkMidnightSplit(user.id, activeLogId, startTime.toISOString())
@@ -58,7 +57,7 @@ export default function Dashboard() {
                     }
                 });
         }
-    }, 60000); // Check every minute
+    }, 60000); 
     return () => clearInterval(midnightInterval);
   }, [timerStatus, startTime, activeLogId, user, selectedDate]);
 
@@ -72,7 +71,6 @@ export default function Dashboard() {
   useEffect(() => {
     if (timerStatus === 'RUNNING' && startTime) {
       timerRef.current = setInterval(() => {
-        // Recalculate based on current time to avoid drift
         const now = new Date();
         const start = new Date(startTime);
         setElapsedSeconds(Math.floor((now.getTime() - start.getTime()) / 1000));
@@ -109,7 +107,6 @@ export default function Dashboard() {
         .single();
       
       if (logs) {
-        // Check for midnight split on load
         const splitLog = await supabaseService.checkMidnightSplit(user.id, logs.id, logs.start_time);
         
         if (splitLog) {
@@ -196,6 +193,17 @@ export default function Dashboard() {
       } catch (err) {
           console.error(err);
           alert('Error adding log');
+      }
+  };
+
+  const handleDeleteLog = async (logId: string) => {
+      if (!confirm('Are you sure you want to delete this log?')) return;
+      try {
+          await supabaseService.deleteLog(logId);
+          fetchDailyData(selectedDate);
+          fetchWeeklyData();
+      } catch (err) {
+          console.error('Error deleting log', err);
       }
   };
 
@@ -358,8 +366,8 @@ export default function Dashboard() {
                     <div className="calendar-wrapper bg-brand-base rounded-3xl p-4 border border-white/5">
                         <Calendar 
                             className="w-full"
-                            value={selectedDate} // Highlight selected, not just today
-                            onClickDay={(value) => setSelectedDate(value)} // Update state on click
+                            value={selectedDate} 
+                            onClickDay={(value) => setSelectedDate(value)}
                         />
                     </div>
                 </div>
@@ -464,7 +472,6 @@ export default function Dashboard() {
                         const items = [];
                         for (let i = 0; i < todayLogs.length; i++) {
                             const log = todayLogs[i];
-                            // Add Session
                             items.push(
                                 <div key={log.id} className="flex justify-between items-center p-6 bg-brand-base/50 hover:bg-brand-base rounded-3xl border border-white/5 transition-all group hover:scale-[1.02] cursor-default mb-4">
                                     <div className="flex flex-col">
@@ -480,16 +487,25 @@ export default function Dashboard() {
                                         </span>
                                     </div>
                                     
-                                    <div className="text-right">
+                                    <div className="text-right flex flex-col items-end gap-2">
                                         <div className={`px-4 py-1.5 rounded-full text-[10px] font-bold tracking-widest uppercase border inline-flex items-center gap-1.5 ${log.status === 'RUNNING' ? 'bg-brand-green/20 text-brand-green border-brand-green/30' : 'bg-white/5 text-white/30 border-white/10'}`}>
                                             <div className={`w-1.5 h-1.5 rounded-full ${log.status === 'RUNNING' ? 'bg-brand-green' : 'bg-white/30'}`}></div>
                                             {log.status === 'RUNNING' ? 'Active' : 'Wear Time'}
+                                        </div>
+                                        <div className="flex items-center gap-3">
+                                            <p className="text-xs text-white/30 font-medium capitalize">{log.reason || 'Session'}</p>
+                                            <button 
+                                                onClick={(e) => { e.stopPropagation(); handleDeleteLog(log.id); }}
+                                                className="p-1.5 rounded-lg text-white/20 hover:text-brand-red hover:bg-brand-red/10 transition-colors opacity-0 group-hover:opacity-100"
+                                                title="Delete Log"
+                                            >
+                                                <Trash2 size={14} />
+                                            </button>
                                         </div>
                                     </div>
                                 </div>
                             );
 
-                            // Detect Break
                             if (log.end_time && i < todayLogs.length - 1) {
                                 const nextLog = todayLogs[i+1];
                                 const breakStart = new Date(log.end_time);
@@ -512,7 +528,6 @@ export default function Dashboard() {
                                     );
                                 }
                             } else if (log.end_time && i === todayLogs.length - 1 && selectedDate.toDateString() === new Date().toDateString()) {
-                                // Break status for current moment if last log is stopped
                                 const breakStart = new Date(log.end_time);
                                 const now = new Date();
                                 const diffMinutes = Math.round((now.getTime() - breakStart.getTime()) / 60000);
