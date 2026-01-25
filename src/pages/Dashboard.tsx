@@ -1,7 +1,7 @@
 
 import { useState, useEffect, useRef } from 'react';
 import Calendar from 'react-calendar';
-import { BarChart, Bar, XAxis, ResponsiveContainer, Cell } from 'recharts';
+import { BarChart, Bar, XAxis, ResponsiveContainer, Cell, LabelList } from 'recharts';
 import { Play, Pause, Settings, Plus, X, Calendar as CalendarIcon, History, BarChart2, Trash2 } from 'lucide-react';
 import { supabaseService } from '../services/supabaseService';
 import type { TimerLog } from '../services/supabaseService';
@@ -53,7 +53,9 @@ export default function Dashboard() {
                     if (newLog) {
                         setStartTime(new Date(newLog.start_time));
                         setActiveLogId(newLog.id);
-                        fetchDailyData(selectedDate);
+                        const today = new Date();
+                        setSelectedDate(today);
+                        fetchDailyData(today);
                     }
                 });
         }
@@ -267,6 +269,20 @@ export default function Dashboard() {
       }
   };
 
+  const handleConfirmChange = async () => {
+        if (!user) return;
+        if (!confirm('Confirm that you have changed your aligners? This will reset the weekly timer.')) return;
+        try {
+            const now = new Date().toISOString();
+            await supabaseService.updateProfile(user.id, {
+                current_aligner_date: now
+            });
+            setJourneyStartDate(now);
+        } catch (err) {
+            console.error(err);
+        }
+    };
+
   const formatTime = (totalSeconds: number) => {
     const h = Math.floor(totalSeconds / 3600);
     const m = Math.floor((totalSeconds % 3600) / 60);
@@ -382,6 +398,7 @@ export default function Dashboard() {
                             <BarChart data={getWeeklyChartData()}>
                                 <XAxis dataKey="name" tick={{fontSize: 10, fill: '#64748b', fontFamily: 'serif'}} axisLine={false} tickLine={false} dy={5} />
                                 <Bar dataKey="hours" radius={[4, 4, 4, 4]}>
+                                    <LabelList dataKey="hours" position="top" fill="rgba(255,255,255,0.5)" fontSize={10} formatter={(val: any) => Number(val) > 0 ? val : ''} />
                                     {getWeeklyChartData().map((_entry, index) => (
                                         <Cell key={`cell-${index}`} fill={index === 6 ? '#94A378' : 'rgba(255,255,255,0.1)'} />
                                     ))}
@@ -426,19 +443,30 @@ export default function Dashboard() {
                                 const nextChange = new Date(start);
                                 nextChange.setDate(start.getDate() + 7);
                                 const now = new Date();
-                                const diffDays = Math.ceil((nextChange.getTime() - now.getTime()) / (1000 * 60 * 60 * 24));
-                                const isOverdue = now > nextChange;
+                                
+                                const oneDay = 24 * 60 * 60 * 1000;
+                                const diffDays = Math.ceil((nextChange.getTime() - now.getTime()) / oneDay);
+                                
+                                const isOverdue = now >= nextChange;
 
                                 return (
-                                    <>
+                                    <div className="flex flex-col items-center">
                                         <p className="text-white/40 text-xs uppercase tracking-widest mb-2">Next Change</p>
-                                        <p className={`text-3xl font-serif-display ${isOverdue ? 'text-brand-red animate-pulse' : 'text-white'}`}>
-                                            {isOverdue ? 'Change Now!' : `${diffDays} Days`}
+                                        <p className={`text-3xl font-serif-display ${isOverdue ? 'text-brand-yellow animate-pulse' : 'text-white'}`}>
+                                            {isOverdue ? 'Change Due!' : `${diffDays} Days`}
                                         </p>
-                                        <p className="text-white/30 text-xs mt-1">
+                                        <p className="text-white/30 text-xs mt-1 mb-3">
                                             {nextChange.toLocaleTimeString([], {weekday: 'long', hour: '2-digit', minute:'2-digit'})}
                                         </p>
-                                    </>
+                                        {isOverdue && (
+                                            <button 
+                                                onClick={handleConfirmChange}
+                                                className="mt-2 px-6 py-2 bg-brand-green text-brand-base font-bold rounded-xl shadow-lg hover:bg-white transition-colors animate-bounce"
+                                            >
+                                                Changed
+                                            </button>
+                                        )}
+                                    </div>
                                 )
                             })()}
                         </div>
@@ -460,14 +488,26 @@ export default function Dashboard() {
                         Today's Sessions
                     </h3>
                     <button 
-                        onClick={() => setShowManualEntryModal(true)}
+                        onClick={() => {
+                            const offset = selectedDate.getTimezoneOffset();
+                            const localDate = new Date(selectedDate.getTime() - (offset*60*1000));
+                            setManualDate(localDate.toISOString().split('T')[0]);
+                            setShowManualEntryModal(true);
+                        }}
                         className="w-full sm:w-auto text-sm bg-brand-base hover:bg-brand-base/80 text-white px-6 py-3 rounded-2xl border border-white/5 transition-colors flex items-center justify-center gap-2 active:scale-95 font-medium tracking-wide shadow-lg"
                     >
                         <Plus size={16} /> Add Log manually
                     </button>
                 </div>
                 <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                    {todayLogs.length === 0 && <div className="col-span-full py-12 text-center text-white/30 italic">No sessions recorded yet today. Start your journey!</div>}
+                    {todayLogs.length === 0 && (
+                        <div className="col-span-full py-12 text-center text-white/30 italic">
+                            {selectedDate.toDateString() === new Date().toDateString() 
+                                ? "No sessions recorded yet today. Start your journey!" 
+                                : `No activity recorded for ${selectedDate.toLocaleDateString(undefined, {weekday:'long', month:'short', day:'numeric'})}.`
+                            }
+                        </div>
+                    )}
                     {(() => {
                         const items = [];
                         for (let i = 0; i < todayLogs.length; i++) {
