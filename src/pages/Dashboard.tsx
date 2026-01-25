@@ -92,7 +92,7 @@ export default function Dashboard() {
   const checkUser = async () => {
     const { data: { user } } = await supabase.auth.getUser();
     if (!user) {
-      navigate('/aligner');
+      navigate('/Aligner');
     } else {
       setUser(user);
       try {
@@ -110,7 +110,8 @@ export default function Dashboard() {
         .select('*')
         .eq('user_id', user.id)
         .eq('status', 'RUNNING')
-        .single();
+        .limit(1)
+        .maybeSingle();
       
       if (logs) {
         const splitLog = await supabaseService.checkMidnightSplit(user.id, logs.id, logs.start_time);
