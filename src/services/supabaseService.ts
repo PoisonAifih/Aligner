@@ -155,10 +155,18 @@ export const supabaseService = {
           const endOfStartDay = new Date(start);
           endOfStartDay.setHours(23, 59, 59, 999);
           
-          await this.pauseTimer(activeLogId, 'Midnight Split');
-          await supabase.from('timer_logs').update({ end_time: endOfStartDay.toISOString() }).eq('id', activeLogId);
+          const { error: updateError } = await supabase
+            .from('timer_logs')
+            .update({ 
+                end_time: endOfStartDay.toISOString(),
+                status: 'PAUSED',
+                reason: 'Midnight Split'
+            })
+            .eq('id', activeLogId);
+            
+          if (updateError) throw updateError;
 
-          const { data: newLog, error } = await supabase
+          const { data: newLog, error: insertError } = await supabase
             .from('timer_logs')
             .insert([
                 { 
@@ -170,7 +178,7 @@ export const supabaseService = {
             .select()
             .single();
             
-          if (error) throw error;
+          if (insertError) throw insertError;
           return newLog;
       }
       return null;

@@ -46,6 +46,9 @@ export default function Dashboard() {
 
   useEffect(() => {
     checkUser();
+  }, []);
+
+  useEffect(() => {
     const midnightInterval = setInterval(() => {
         if (timerStatus === 'RUNNING' && startTime && activeLogId && user) {
             supabaseService.checkMidnightSplit(user.id, activeLogId, startTime.toISOString())
@@ -53,13 +56,16 @@ export default function Dashboard() {
                     if (newLog) {
                         setStartTime(new Date(newLog.start_time));
                         setActiveLogId(newLog.id);
-                        fetchDailyData(selectedDate);
+                        const today = new Date();
+                        setSelectedDate(today);
+                        fetchDailyData(today);
                     }
-                });
+                })
+                .catch(err => console.error("Error in midnight check:", err));
         }
-    }, 60000); 
+    }, 10000); 
     return () => clearInterval(midnightInterval);
-  }, [timerStatus, startTime, activeLogId, user, selectedDate]);
+  }, [timerStatus, startTime, activeLogId, user]);
 
   useEffect(() => {
     if (user) {
@@ -496,10 +502,10 @@ export default function Dashboard() {
                                             <p className="text-xs text-white/30 font-medium capitalize">{log.reason || 'Session'}</p>
                                             <button 
                                                 onClick={(e) => { e.stopPropagation(); handleDeleteLog(log.id); }}
-                                                className="p-2 rounded-lg text-white/20 hover:text-brand-red hover:bg-brand-red/10 transition-colors"
+                                                className="p-1.5 rounded-lg text-white/20 hover:text-brand-red hover:bg-brand-red/10 transition-colors opacity-0 group-hover:opacity-100"
                                                 title="Delete Log"
                                             >
-                                                <Trash2 size={16} />
+                                                <Trash2 size={14} />
                                             </button>
                                         </div>
                                     </div>
