@@ -295,12 +295,17 @@ export default function Dashboard() {
     return `${h.toString().padStart(2, '0')}:${m.toString().padStart(2, '0')}:${s.toString().padStart(2, '0')}`;
   };
 
+  const isSelectedDateToday = () => {
+     const today = new Date();
+     return selectedDate.toDateString() === today.toDateString();
+  };
+
   const totalWearTimeToday = todayLogs.reduce((acc, log) => {
      if (log.status === 'RUNNING') return acc;
      const start = new Date(log.start_time).getTime();
      const end = log.end_time ? new Date(log.end_time).getTime() : new Date().getTime();
      return acc + (end - start);
-  }, 0) + (timerStatus === 'RUNNING' ? elapsedSeconds * 1000 : 0);
+  }, 0) + (timerStatus === 'RUNNING' && isSelectedDateToday() ? elapsedSeconds * 1000 : 0);
 
   const getWeeklyChartData = () => {
       const days = ['Sun', 'Mon', 'Tue', 'Wed', 'Thu', 'Fri', 'Sat'];
@@ -352,28 +357,32 @@ export default function Dashboard() {
                 <div className="absolute top-0 right-0 p-6 opacity-5">
                     <Play size={200} />
                 </div>
-                <h2 className="text-brand-green/80 text-sm uppercase tracking-[0.3em] mb-6 font-bold text-center">Current Session</h2>
+                <h2 className="text-brand-green/80 text-sm uppercase tracking-[0.3em] mb-6 font-bold text-center">
+                    {isSelectedDateToday() ? "Current Session" : `Total for ${selectedDate.toLocaleDateString()}`}
+                </h2>
                 <div className="text-[6rem] sm:text-[8rem] leading-none font-serif-display text-white mb-10 drop-shadow-2xl">
                     {formatTime(Math.floor(totalWearTimeToday / 1000))}
                 </div>
                 
-                <div className="flex gap-6 w-full justify-center relative z-10">
-                    {timerStatus === 'RUNNING' ? (
+                <div className="flex gap-6 w-full justify-center relative z-10 h-20">
+                    {isSelectedDateToday() && (
+                        timerStatus === 'RUNNING' ? (
+                                <button 
+                                onClick={handlePauseClick}
+                                className="flex items-center gap-3 px-10 py-5 bg-brand-yellow/10 hover:bg-brand-yellow/20 text-brand-yellow border border-brand-yellow/20 hover:border-brand-yellow/40 rounded-2xl transition-all w-64 justify-center active:scale-95 shadow-xl"
+                            >
+                                <Pause size={24} className="fill-current"/>
+                                <span className="text-xl font-serif-display tracking-wide font-medium">Pause</span>
+                            </button>
+                        ) : (
                             <button 
-                            onClick={handlePauseClick}
-                            className="flex items-center gap-3 px-10 py-5 bg-brand-yellow/10 hover:bg-brand-yellow/20 text-brand-yellow border border-brand-yellow/20 hover:border-brand-yellow/40 rounded-2xl transition-all w-64 justify-center active:scale-95 shadow-xl"
-                        >
-                            <Pause size={24} className="fill-current"/>
-                            <span className="text-xl font-serif-display tracking-wide font-medium">Pause</span>
-                        </button>
-                    ) : (
-                        <button 
-                            onClick={handleStartTimer}
-                            className="flex items-center gap-3 px-10 py-5 bg-primary hover:bg-primary/90 text-white rounded-2xl shadow-xl shadow-primary/20 hover:shadow-primary/30 transition-all w-64 justify-center active:scale-95 border border-white/10"
-                        >
-                            <Play size={24} className="fill-current" />
-                            <span className="text-xl font-serif-display tracking-wide font-medium">Resume</span>
-                        </button>
+                                onClick={handleStartTimer}
+                                className="flex items-center gap-3 px-10 py-5 bg-primary hover:bg-primary/90 text-white rounded-2xl shadow-xl shadow-primary/20 hover:shadow-primary/30 transition-all w-64 justify-center active:scale-95 border border-white/10"
+                            >
+                                <Play size={24} className="fill-current" />
+                                <span className="text-xl font-serif-display tracking-wide font-medium">Resume</span>
+                            </button>
+                        )
                     )}
                 </div>
             </div>
