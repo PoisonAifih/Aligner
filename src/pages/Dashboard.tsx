@@ -303,7 +303,19 @@ export default function Dashboard() {
   const totalWearTimeToday = todayLogs.reduce((acc, log) => {
      if (log.status === 'RUNNING') return acc;
      const start = new Date(log.start_time).getTime();
-     const end = log.end_time ? new Date(log.end_time).getTime() : new Date().getTime();
+     let end;
+     if (log.end_time) {
+         end = new Date(log.end_time).getTime();
+     } else {
+         if (isSelectedDateToday()) {
+             end = new Date().getTime();
+         } else {
+             const startOfDay = new Date(log.start_time);
+             const endOfDay = new Date(startOfDay);
+             endOfDay.setHours(23, 59, 59, 999);
+             end = endOfDay.getTime();
+         }
+     }
      return acc + (end - start);
   }, 0) + (timerStatus === 'RUNNING' && isSelectedDateToday() ? elapsedSeconds * 1000 : 0);
 
