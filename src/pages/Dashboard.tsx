@@ -3,7 +3,7 @@ import { useState, useEffect, useRef } from 'react';
 import Calendar from 'react-calendar';
 import { BarChart, Bar, XAxis, ResponsiveContainer, Cell, LabelList } from 'recharts';
 import { Play, Pause, Settings, Plus, X, Calendar as CalendarIcon, History, BarChart2, Trash2 } from 'lucide-react';
-import { supabaseService } from '../services/supabaseService';
+import { supabaseService, parseDBDate } from '../services/supabaseService';
 import type { TimerLog } from '../services/supabaseService';
 import { supabase } from '../supabaseClient';
 import { useNavigate } from 'react-router-dom';
@@ -54,7 +54,7 @@ export default function Dashboard() {
             supabaseService.checkMidnightSplit(user.id, activeLogId, startTime.toISOString())
                 .then(newLog => {
                     if (newLog) {
-                        setStartTime(new Date(newLog.start_time));
+                        setStartTime(parseDBDate(newLog.start_time));
                         setActiveLogId(newLog.id);
                         const today = new Date();
                         setSelectedDate(today);
@@ -118,15 +118,15 @@ export default function Dashboard() {
         
         if (splitLog) {
             setTimerStatus('RUNNING');
-            setStartTime(new Date(splitLog.start_time));
+            setStartTime(parseDBDate(splitLog.start_time));
             setActiveLogId(splitLog.id);
-            setElapsedSeconds(Math.floor((new Date().getTime() - new Date(splitLog.start_time).getTime()) / 1000));
+            setElapsedSeconds(Math.floor((new Date().getTime() - parseDBDate(splitLog.start_time).getTime()) / 1000));
         } else {
             setTimerStatus('RUNNING');
-            setStartTime(new Date(logs.start_time));
+            setStartTime(parseDBDate(logs.start_time));
             setActiveLogId(logs.id);
             const now = new Date();
-            const start = new Date(logs.start_time);
+            const start = parseDBDate(logs.start_time);
             setElapsedSeconds(Math.floor((now.getTime() - start.getTime()) / 1000));
         }
       }
@@ -302,15 +302,15 @@ export default function Dashboard() {
 
   const totalWearTimeToday = todayLogs.reduce((acc, log) => {
      if (log.status === 'RUNNING') return acc;
-     const start = new Date(log.start_time).getTime();
+     const start = parseDBDate(log.start_time).getTime();
      let end;
      if (log.end_time) {
-         end = new Date(log.end_time).getTime();
+         end = parseDBDate(log.end_time).getTime();
      } else {
          if (isSelectedDateToday()) {
              end = new Date().getTime();
          } else {
-             const startOfDay = new Date(log.start_time);
+             const startOfDay = parseDBDate(log.start_time);
              const endOfDay = new Date(startOfDay);
              endOfDay.setHours(23, 59, 59, 999);
              end = endOfDay.getTime();
@@ -329,13 +329,13 @@ export default function Dashboard() {
 
       return last7Days.map(date => {
           const dayLogs = weeklyLogs.filter(log => {
-              const logDate = new Date(log.start_time);
+              const logDate = parseDBDate(log.start_time);
               return logDate.toDateString() === date.toDateString();
           });
           
           const totalMs = dayLogs.reduce((acc, log) => {
-             const start = new Date(log.start_time).getTime();
-             const end = log.end_time ? new Date(log.end_time).getTime() : (
+             const start = parseDBDate(log.start_time).getTime();
+             const end = log.end_time ? parseDBDate(log.end_time).getTime() : (
                  log.status === 'RUNNING' ? new Date().getTime() : start 
              );
              return acc + (end - start);
@@ -458,14 +458,14 @@ export default function Dashboard() {
                             <div>
                                 <h3 className="text-xl font-serif-display text-white">Current Aligner</h3>
                                 <p className="text-brand-green text-sm font-medium uppercase tracking-wider mt-1">
-                                    Started {new Date(journeyStartDate).toLocaleDateString()}
+                                    Started {parseDBDate(journeyStartDate).toLocaleDateString()}
                                 </p>
                             </div>
                         </div>
 
                          <div className="text-center relative z-10">
                             {(() => {
-                                const start = new Date(journeyStartDate);
+                                const start = parseDBDate(journeyStartDate);
                                 const nextChange = new Date(start);
                                 nextChange.setDate(start.getDate() + 7);
                                 const now = new Date();
@@ -542,12 +542,12 @@ export default function Dashboard() {
                                 <div key={log.id} className="flex justify-between items-center p-6 bg-brand-base/50 hover:bg-brand-base rounded-3xl border border-white/5 transition-all group hover:scale-[1.02] cursor-default mb-4">
                                     <div className="flex flex-col">
                                         <span className="text-2xl font-serif-display text-white/90">
-                                            {new Date(log.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 
+                                            {parseDBDate(log.start_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})} 
                                         </span>
                                         <span className="text-xs text-white/40 mt-1 uppercase tracking-wider flex items-center gap-2">
                                              {log.end_time ? (
                                                  <>
-                                                    to {new Date(log.end_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
+                                                    to {parseDBDate(log.end_time).toLocaleTimeString([], {hour: '2-digit', minute:'2-digit'})}
                                                  </>
                                              ) : <span className="text-brand-green font-bold animate-pulse">Running</span>}
                                         </span>
@@ -574,8 +574,8 @@ export default function Dashboard() {
 
                             if (log.end_time && i < todayLogs.length - 1) {
                                 const nextLog = todayLogs[i+1];
-                                const breakStart = new Date(log.end_time);
-                                const breakEnd = new Date(nextLog.start_time);
+                                const breakStart = parseDBDate(log.end_time);
+                                const breakEnd = parseDBDate(nextLog.start_time);
                                 const diffMinutes = Math.round((breakEnd.getTime() - breakStart.getTime()) / 60000);
 
                                 if (diffMinutes > 0) {
@@ -594,7 +594,7 @@ export default function Dashboard() {
                                     );
                                 }
                             } else if (log.end_time && i === todayLogs.length - 1 && selectedDate.toDateString() === new Date().toDateString()) {
-                                const breakStart = new Date(log.end_time);
+                                const breakStart = parseDBDate(log.end_time);
                                 const now = new Date();
                                 const diffMinutes = Math.round((now.getTime() - breakStart.getTime()) / 60000);
                                 if (diffMinutes > 1) {

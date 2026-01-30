@@ -141,7 +141,7 @@ export const supabaseService = {
   async checkMidnightSplit(userId: string, activeLogId: string | null, startTimeString: string) {
       if (!activeLogId) return null;
       
-      const start = new Date(startTimeString);
+      const start = parseDBDate(startTimeString);
       const now = new Date();
       
       const startDay = new Date(start);
@@ -183,4 +183,13 @@ export const supabaseService = {
       }
       return null;
   }
+};
+
+export const parseDBDate = (dateStr: string): Date => {
+    if (!dateStr) return new Date();
+    let normalized = dateStr.replace(' ', 'T');
+    if (!normalized.endsWith('Z') && !/[+-]\d{2}:?\d{2}$/.test(normalized)) {
+        normalized += 'Z';
+    }
+    return new Date(normalized);
 };
