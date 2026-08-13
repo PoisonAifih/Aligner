@@ -1,194 +1,313 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Bar, BarChart, Cell, ResponsiveContainer, Tooltip, XAxis } from 'recharts';
+import { AlertCircle, ArrowRight, CheckCircle, Clock, RefreshCw, Search, Users } from 'lucide-react';
+import { supabaseService } from '../services/supabaseService';
+import type { Profile, TimerLog } from '../services/supabaseService';
+import { useAuth } from '../context/useAuth';
+import { useToday } from '../hooks/useToday';
+import { addDays, endOfDay, formatShortDate, lastNDays, startOfDay } from '../lib/time';
+import {
+  COMPLIANCE_HEX,
+  COMPLIANCE_LABELS,
+  MIN_ACCEPTABLE_HOURS,
+  SKIPPED_DAY_HOURS,
+  complianceClasses,
+  complianceFor,
+  dailyWear,
+  lastActivityAt,
+  summariseWear,
+} from '../lib/wearTime';
+import type { Compliance } from '../lib/wearTime';
 
-import { useState, useEffect } from 'react';
-import { supabase } from '../supabaseClient';
-import { Users, AlertCircle, CheckCircle, Clock } from 'lucide-react';
-import { BarChart, Bar, Cell, ResponsiveContainer, XAxis, Tooltip } from 'recharts';
+const WINDOW_DAYS = 7;
 
-interface PatientData {
-    id: string;
-    username: string;
-    email: string;
-    logs: any[];
-    compliance: 'green' | 'yellow' | 'red';
-    avgHours: number;
-    chartData?: { day: string; hours: number }[];
+type ComplianceFilter = Compliance | 'all';
+
+interface PatientRow {
+  profile: Profile;
+  compliance: Compliance;
+  averageHours: number;
+  skippedDays: number;
+  lastActive: Date | null;
+  chartData: Array<{ label: string; hours: number }>;
 }
+
+const FILTERS: Array<{ value: ComplianceFilter; label: string }> = [
+  { value: 'all', label: 'All patients' },
+  { value: 'red', label: 'At risk' },
+  { value: 'yellow', label: 'Watch' },
+  { value: 'green', label: 'On track' },
+];
 
 export default function DentistDashboard() {
-    const [patients, setPatients] = useState<PatientData[]>([]);
-    const [loading, setLoading] = useState(true);
+  const navigate = useNavigate();
+  const { user } = useAuth();
+  const today = useToday();
 
-    useEffect(() => {
-        fetchPatients();
-    }, []);
+  const [rows, setRows] = useState<PatientRow[]>([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [search, setSearch] = useState('');
+  const [filter, setFilter] = useState<ComplianceFilter>('all');
 
-    const fetchPatients = async () => {
-        const { data: { user } } = await supabase.auth.getUser();
-        if (!user) return;
+  const load = useCallback(async () => {
+    if (!user) return;
+    setLoading(true);
+    setError(null);
 
-        const { data: assignments } = await supabase
-            .from('assignments')
-            .select('patient_id')
-            .eq('dentist_id', user.id);
+    try {
+      const assignments = await supabaseService.getAssignmentsForDentist(user.id);
+      const patientIds = assignments.map((assignment) => assignment.patient_id);
 
-        if (!assignments || assignments.length === 0) {
-            setLoading(false);
-            return;
+      if (patientIds.length === 0) {
+        setRows([]);
+        return;
+      }
+
+      const windowStart = startOfDay(addDays(today, -(WINDOW_DAYS - 1)));
+      const [profiles, logs] = await Promise.all([
+        supabaseService.getProfilesByIds(patientIds),
+        supabaseService.getLogsInRangeForUsers(patientIds, windowStart, endOfDay(today)),
+      ]);
+
+      const now = new Date();
+      const days = lastNDays(WINDOW_DAYS, today);
+      const logsByPatient = new Map<string, TimerLog[]>();
+      logs.forEach((log) => {
+        const list = logsByPatient.get(log.user_id) ?? [];
+        list.push(log);
+        logsByPatient.set(log.user_id, list);
+      });
+
+      const computed = profiles.map<PatientRow>((profile) => {
+        const patientLogs = logsByPatient.get(profile.id) ?? [];
+        const daily = dailyWear(patientLogs, days, now);
+        const summary = summariseWear(daily, now);
+
+        return {
+          profile,
+          compliance: complianceFor(summary),
+          averageHours: summary.averageHours,
+          skippedDays: summary.skippedDays,
+          lastActive: lastActivityAt(patientLogs),
+          chartData: daily.map((day) => ({
+            label: formatShortDate(day.date),
+            hours: Number(day.hours.toFixed(1)),
+          })),
+        };
+      });
+
+      const severity: Record<Compliance, number> = { red: 0, yellow: 1, green: 2 };
+      computed.sort((a, b) => {
+        if (severity[a.compliance] !== severity[b.compliance]) {
+          return severity[a.compliance] - severity[b.compliance];
         }
+        return a.averageHours - b.averageHours;
+      });
 
-        const patientIds = assignments.map(a => a.patient_id);
+      setRows(computed);
+    } catch (loadError) {
+      console.error(loadError);
+      setError(loadError instanceof Error ? loadError.message : 'Could not load your patients.');
+    } finally {
+      setLoading(false);
+    }
+  }, [user, today]);
 
-        const { data: profiles } = await supabase
-            .from('profiles')
-            .select('*')
-            .in('id', patientIds);
+  useEffect(() => {
+    void load();
+  }, [load]);
 
-        const startOfWeek = new Date();
-        startOfWeek.setDate(startOfWeek.getDate() - 7);
-        
-        const { data: logs } = await supabase
-            .from('timer_logs')
-            .select('*')
-            .in('user_id', patientIds)
-            .gte('start_time', startOfWeek.toISOString());
+  const stats = useMemo(() => {
+    const atRisk = rows.filter((row) => row.compliance === 'red').length;
+    const watch = rows.filter((row) => row.compliance === 'yellow').length;
+    const average =
+      rows.length > 0 ? rows.reduce((total, row) => total + row.averageHours, 0) / rows.length : 0;
+    return { total: rows.length, atRisk, watch, average };
+  }, [rows]);
 
-        const processed = (profiles || []).map(profile => {
-            const patientLogs = (logs || []).filter(l => l.user_id === profile.id);
-            
-            let totalHours = 0;
-            const dailyHours: Record<string, number> = {};
-            
-            for(let i=0; i<7; i++) {
-                 const d = new Date();
-                 d.setDate(d.getDate() - i);
-                 dailyHours[d.toDateString()] = 0;
-            }
+  const visibleRows = useMemo(() => {
+    const term = search.trim().toLowerCase();
+    return rows.filter((row) => {
+      if (filter !== 'all' && row.compliance !== filter) return false;
+      if (!term) return true;
+      return (
+        (row.profile.username ?? '').toLowerCase().includes(term) ||
+        (row.profile.email ?? '').toLowerCase().includes(term)
+      );
+    });
+  }, [rows, filter, search]);
 
-            patientLogs.forEach(log => {
-                const dateKey = new Date(log.start_time).toDateString();
-                const start = new Date(log.start_time).getTime();
-                const end = log.end_time ? new Date(log.end_time).getTime() : new Date().getTime();
-                const hours = (end - start) / (1000 * 60 * 60);
-                
-                if (dailyHours[dateKey] !== undefined) {
-                    dailyHours[dateKey] += hours;
-                    totalHours += hours;
-                }
-            });
-
-            const daysValues = Object.values(dailyHours);
-            const avgHours = daysValues.reduce((a, b) => a + b, 0) / 7;
-            
-            const hasSkippedDay = daysValues.some(h => h < 0.1); 
-            const isLowUsage = avgHours < 20;
-
-            let compliance: 'green' | 'yellow' | 'red' = 'green';
-            if (hasSkippedDay) compliance = 'red';
-            else if (isLowUsage) compliance = 'yellow';
-
-            const chartData = Object.entries(dailyHours).map(([date, hours]) => ({
-                day: new Date(date).toLocaleDateString(undefined, {weekday: 'narrow'}),
-                hours: hours
-            })).reverse();
-
-            return {
-                id: profile.id,
-                username: profile.username || profile.email?.split('@')[0],
-                email: profile.email,
-                logs: patientLogs,
-                compliance,
-                avgHours,
-                chartData
-            };
-        });
-
-        setPatients(processed);
-        setLoading(false);
-    };
-
-    const getStatusColor = (status: string) => {
-        switch(status) {
-            case 'green': return 'text-brand-green border-brand-green/30 bg-brand-green/10';
-            case 'yellow': return 'text-brand-yellow border-brand-yellow/30 bg-brand-yellow/10';
-            case 'red': return 'text-brand-red border-brand-red/30 bg-brand-red/10';
-            default: return 'text-white border-white/10';
-        }
-    };
-
-    return (
-        <div className="space-y-8 animate-in fade-in duration-500">
-             <div className="flex items-center gap-4 mb-8">
-                <div className="w-14 h-14 bg-brand-surface rounded-2xl flex items-center justify-center border border-white/5">
-                    <Users size={32} className="text-white"/>
-                </div>
-                <div>
-                    <h1 className="text-3xl font-serif-display text-white">My Patients</h1>
-                    <p className="text-white/50 text-sm">Monitor compliance and weekly progress.</p>
-                </div>
-            </div>
-
-            {loading ? (
-                <div className="text-white/50 text-center py-20">Loading patients...</div>
-            ) : patients.length === 0 ? (
-                <div className="bg-card border border-white/5 rounded-[2.5rem] p-12 text-center text-white/50">
-                    No patients assigned yet. Ask an admin to link patients to your profile.
-                </div>
-            ) : (
-                <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-6">
-                    {patients.map(patient => (
-                        <div key={patient.id} className="bg-card border border-white/5 rounded-[2.5rem] p-8 shadow-xl flex flex-col hover:border-white/10 transition-all">
-                            <div className="flex justify-between items-start mb-6">
-                                <div>
-                                    <h3 className="text-xl font-serif-display text-white">{patient.username}</h3>
-                                    <p className="text-xs text-white/40">{patient.email}</p>
-                                </div>
-                                <div className={`px-3 py-1 rounded-full text-xs font-bold uppercase tracking-widest border flex items-center gap-2 ${getStatusColor(patient.compliance)}`}>
-                                    {patient.compliance === 'green' && <CheckCircle size={14} />}
-                                    {patient.compliance === 'yellow' && <Clock size={14} />}
-                                    {patient.compliance === 'red' && <AlertCircle size={14} />}
-                                    {patient.compliance.toUpperCase()}
-                                </div>
-                            </div>
-
-                            <div className="flex-1 mb-6">
-                                <div className="flex justify-between items-end mb-2">
-                                     <span className="text-xs text-white/50 uppercase tracking-widest">Weekly Avg</span>
-                                     <span className="text-2xl font-serif-display text-white">{patient.avgHours.toFixed(1)} <span className="text-sm text-white/40">hrs</span></span>
-                                </div>
-                                <div className="h-32 w-full">
-                                    <ResponsiveContainer width="100%" height="100%">
-                                        <BarChart data={patient.chartData || []}>
-                                            <XAxis dataKey="day" tick={{fontSize: 10, fill: '#64748b'}} axisLine={false} tickLine={false} />
-                                             <Tooltip 
-                                                cursor={{fill: 'rgba(255,255,255,0.05)'}}
-                                                contentStyle={{backgroundColor: '#1f2937', borderColor: 'transparent', borderRadius: '8px', color: '#fff'}}
-                                             />
-                                            <Bar dataKey="hours" radius={[3, 3, 3, 3]}>
-                                                {(patient.chartData || []).map((entry: any, index: number) => (
-                                                    <Cell key={`cell-${index}`} fill={patient.compliance === 'red' && entry.hours < 0.1 ? '#A72703' : profileColor(patient.compliance)} />
-                                                ))}
-                                            </Bar>
-                                        </BarChart>
-                                    </ResponsiveContainer>
-                                </div>
-                            </div>
-                            
-                            <button className="w-full py-3 rounded-xl bg-brand-base hover:bg-brand-base/80 text-white/60 hover:text-white transition-colors text-sm font-medium">
-                                View Full Records
-                            </button>
-                        </div>
-                    ))}
-                </div>
-            )}
+  return (
+    <div className="space-y-8 animate-in fade-in duration-500">
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="flex items-center gap-4">
+          <div className="flex h-14 w-14 items-center justify-center rounded-2xl border border-white/5 bg-brand-surface">
+            <Users size={32} className="text-white" />
+          </div>
+          <div>
+            <h1 className="text-3xl font-serif-display text-white">My Patients</h1>
+            <p className="text-sm text-white/50">
+              Wear time over the last {WINDOW_DAYS} days. Today is excluded from the average while it is
+              still in progress.
+            </p>
+          </div>
         </div>
-    );
+
+        <button
+          onClick={() => void load()}
+          className="flex items-center gap-2 self-start rounded-2xl border border-white/5 bg-brand-base px-5 py-3 text-sm font-medium text-white/70 transition-colors hover:text-white"
+        >
+          <RefreshCw size={16} className={loading ? 'animate-spin' : undefined} /> Refresh
+        </button>
+      </div>
+
+      <div className="grid grid-cols-2 gap-4 lg:grid-cols-4">
+        <StatCard label="Patients" value={`${stats.total}`} />
+        <StatCard label="At risk" value={`${stats.atRisk}`} accent="text-brand-red" />
+        <StatCard label="Needs watching" value={`${stats.watch}`} accent="text-brand-yellow" />
+        <StatCard
+          label="Average wear"
+          value={`${stats.average.toFixed(1)}h`}
+          accent={stats.average >= MIN_ACCEPTABLE_HOURS ? 'text-brand-green' : 'text-brand-yellow'}
+        />
+      </div>
+
+      {error && (
+        <div className="rounded-2xl border border-brand-red/30 bg-brand-red/10 p-4 text-sm font-medium text-brand-red">
+          {error}
+        </div>
+      )}
+
+      <div className="flex flex-col gap-4 lg:flex-row lg:items-center lg:justify-between">
+        <div className="relative w-full lg:max-w-sm">
+          <Search size={18} className="absolute left-4 top-1/2 -translate-y-1/2 text-white/30" />
+          <input
+            value={search}
+            onChange={(event) => setSearch(event.target.value)}
+            placeholder="Search patients"
+            className="w-full rounded-2xl border border-white/5 bg-brand-base py-3.5 pl-12 pr-4 text-white outline-none transition-colors placeholder:text-white/20 focus:border-brand-green"
+          />
+        </div>
+
+        <div className="flex flex-wrap gap-2 rounded-2xl border border-white/5 bg-brand-base p-1.5">
+          {FILTERS.map((option) => (
+            <button
+              key={option.value}
+              onClick={() => setFilter(option.value)}
+              className={`rounded-xl px-4 py-2 text-sm font-medium transition-all ${
+                filter === option.value ? 'bg-white/10 text-white' : 'text-white/40 hover:bg-white/5 hover:text-white'
+              }`}
+            >
+              {option.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      {loading ? (
+        <p className="py-20 text-center text-white/50">Loading patients…</p>
+      ) : rows.length === 0 ? (
+        <div className="rounded-[2.5rem] border border-white/5 bg-card p-12 text-center text-white/50">
+          No patients assigned yet. Ask an admin to link patients to your profile.
+        </div>
+      ) : visibleRows.length === 0 ? (
+        <div className="rounded-[2.5rem] border border-white/5 bg-card p-12 text-center text-white/50">
+          No patients match this filter.
+        </div>
+      ) : (
+        <div className="grid grid-cols-1 gap-6 md:grid-cols-2 xl:grid-cols-3">
+          {visibleRows.map((row) => (
+            <PatientCard
+              key={row.profile.id}
+              row={row}
+              onOpen={() => navigate(`/aligner/dentist/patients/${row.profile.id}`)}
+            />
+          ))}
+        </div>
+      )}
+    </div>
+  );
 }
 
-const profileColor = (status: string) => {
-    switch(status) {
-        case 'green': return '#94A378';
-        case 'yellow': return '#E5BA41';
-        case 'red': return '#A72703';
-        default: return '#94A378';
-    }
-};
+function PatientCard({ row, onOpen }: { row: PatientRow; onOpen: () => void }) {
+  const { profile, compliance, averageHours, skippedDays, lastActive, chartData } = row;
+
+  return (
+    <div className="flex flex-col rounded-[2.5rem] border border-white/5 bg-card p-8 shadow-xl transition-all hover:border-white/10">
+      <div className="mb-6 flex items-start justify-between gap-3">
+        <div className="min-w-0">
+          <h3 className="truncate font-serif-display text-xl text-white">
+            {profile.username || profile.email?.split('@')[0]}
+          </h3>
+          <p className="truncate text-xs text-white/40">{profile.email}</p>
+        </div>
+        <div
+          className={`flex shrink-0 items-center gap-2 rounded-full border px-3 py-1 text-[10px] font-bold uppercase tracking-widest ${complianceClasses(compliance)}`}
+        >
+          {compliance === 'green' && <CheckCircle size={14} />}
+          {compliance === 'yellow' && <Clock size={14} />}
+          {compliance === 'red' && <AlertCircle size={14} />}
+          {COMPLIANCE_LABELS[compliance]}
+        </div>
+      </div>
+
+      <div className="mb-6 flex-1">
+        <div className="mb-2 flex items-end justify-between">
+          <span className="text-xs uppercase tracking-widest text-white/50">Daily average</span>
+          <span className="font-serif-display text-2xl text-white">
+            {averageHours.toFixed(1)} <span className="text-sm text-white/40">hrs</span>
+          </span>
+        </div>
+
+        <div className="h-32 w-full">
+          <ResponsiveContainer width="100%" height="100%">
+            <BarChart data={chartData}>
+              <XAxis dataKey="label" tick={{ fontSize: 9, fill: '#64748b' }} axisLine={false} tickLine={false} />
+              <Tooltip
+                cursor={{ fill: 'rgba(255,255,255,0.05)' }}
+                contentStyle={{
+                  backgroundColor: '#313647',
+                  borderColor: 'rgba(255,255,255,0.1)',
+                  borderRadius: '12px',
+                  color: '#fff',
+                }}
+                formatter={(value: unknown) => [`${Number(value).toFixed(1)} h`, 'Worn']}
+              />
+              <Bar dataKey="hours" radius={[3, 3, 3, 3]}>
+                {chartData.map((entry, index) => (
+                  <Cell
+                    key={`${entry.label}-${index}`}
+                    fill={entry.hours < SKIPPED_DAY_HOURS ? COMPLIANCE_HEX.red : COMPLIANCE_HEX[compliance]}
+                  />
+                ))}
+              </Bar>
+            </BarChart>
+          </ResponsiveContainer>
+        </div>
+
+        <p className="mt-3 text-xs text-white/30">
+          {skippedDays > 0 ? `${skippedDays} day${skippedDays === 1 ? '' : 's'} without wear · ` : ''}
+          {lastActive ? `Last activity ${lastActive.toLocaleString()}` : 'No activity recorded'}
+        </p>
+      </div>
+
+      <button
+        onClick={onOpen}
+        className="flex w-full items-center justify-center gap-2 rounded-xl bg-brand-base py-3 text-sm font-medium text-white/60 transition-colors hover:bg-brand-base/80 hover:text-white"
+      >
+        View full records <ArrowRight size={16} />
+      </button>
+    </div>
+  );
+}
+
+function StatCard({ label, value, accent = 'text-white' }: { label: string; value: string; accent?: string }) {
+  return (
+    <div className="rounded-3xl border border-white/5 bg-card p-6 shadow-lg">
+      <p className="text-xs uppercase tracking-widest text-white/40">{label}</p>
+      <p className={`mt-2 font-serif-display text-3xl ${accent}`}>{value}</p>
+    </div>
+  );
+}

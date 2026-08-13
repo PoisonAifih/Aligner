@@ -1,5 +1,4 @@
 
-/* React Calendar Dark Theme Overrides */
 .react-calendar {
   background: transparent !important;
   border: none !important;
@@ -53,12 +52,12 @@
 }
 
 .react-calendar__tile--now {
-  background: rgba(148, 163, 120, 0.3) !important; /* brand-green/30 */
+  background: rgba(148, 163, 120, 0.3) !important;
   color: white !important;
 }
 
 .react-calendar__tile--active {
-  background: #94A378 !important; /* brand-green */
+  background: #94A378 !important;
   color: white !important;
   box-shadow: 0 4px 12px rgba(148, 163, 120, 0.3);
 }
@@ -69,7 +68,7 @@
 }
 
 .react-calendar__month-view__days__day--weekend {
-  color: #E5BA41 !important; /* brand-yellow */
+  color: #E5BA41 !important;
 }
 
 .react-calendar__month-view__days__day--neighboringMonth {

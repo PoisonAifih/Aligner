@@ -7,11 +7,8 @@ if (!supabaseUrl || !supabaseKey) {
   console.error("Missing Supabase environment variables. Make sure VITE_SUPABASE_URL and VITE_SUPABASE_ANON_KEY are set in your .env file.");
 }
 
-// import { CookieStorage } from "./lib/storage";
-
 export const supabase = createClient(supabaseUrl || '', supabaseKey || '', {
   auth: {
-    // storage: CookieStorage,
     autoRefreshToken: true,
     persistSession: true,
     detectSessionInUrl: true

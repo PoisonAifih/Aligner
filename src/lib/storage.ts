@@ -17,13 +17,9 @@ export const CookieStorage = {
     return null;
   },
   setItem: (key: string, value: string) => {
-    // Default to 1 year expiry for persisted sessions, or let Supabase handle expiry if it passes options? 
-    // Supabase client doesn't pass options to setItem in the Storage interface usually.
-    // We'll set a reasonable default.
     const d = new Date();
     d.setTime(d.getTime() + (365 * 24 * 60 * 60 * 1000));
     const expires = `expires=${d.toUTCString()}`;
-    // Use Lax for security, path / for global access
     document.cookie = `${key}=${value};${expires};path=/;SameSite=Lax;Secure`; 
   },
   removeItem: (key: string) => {

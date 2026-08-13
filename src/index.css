@@ -28,6 +28,7 @@
   --color-brand-green: #94A378;
   --color-brand-yellow: #E5BA41;
   --color-brand-red: #A72703;
+  --color-brand-accent: #E5BA41;
 
   --color-background: var(--brand-base);
   --color-foreground: #f8fafc;
